@@ -2,11 +2,11 @@ import json
 import os
 import psycopg2
 from typing import Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     '''
-    Business: Manage chat messages in database with auto-cleanup at midnight
+    Business: Manage chat messages in database with auto-cleanup every 24h
     Args: event - dict with httpMethod, body, queryStringParameters
           context - object with request_id attribute
     Returns: HTTP response with messages or status
@@ -42,6 +42,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     cursor = conn.cursor()
     
     try:
+        cutoff_time = datetime.now() - timedelta(hours=24)
+        cursor.execute(
+            'DELETE FROM chat_messages WHERE created_at < %s',
+            (cutoff_time,)
+        )
+        
         if method == 'GET':
             cursor.execute('''
                 SELECT id, role, content, created_at 
