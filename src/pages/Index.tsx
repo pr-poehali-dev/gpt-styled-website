@@ -12,6 +12,10 @@ interface Message {
   timestamp: Date;
 }
 
+const filterContent = (text: string): string => {
+  return text.replace(/\{[^}]*\}/g, '');
+};
+
 const Index = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -20,10 +24,72 @@ const Index = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    loadMessages();
+    setupMidnightCleanup();
+  }, []);
+
+  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  const loadMessages = async () => {
+    try {
+      const response = await fetch('https://functions.poehali.dev/cc9e9e98-99a8-4de9-9f8a-af23c8d8c0cf');
+      const data = await response.json();
+      
+      if (response.ok && data.messages) {
+        const loadedMessages = data.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+        setMessages(loadedMessages);
+      }
+    } catch (error) {
+      console.error('Failed to load messages:', error);
+    }
+  };
+
+  const saveMessage = async (role: 'user' | 'assistant', content: string) => {
+    try {
+      await fetch('https://functions.poehali.dev/cc9e9e98-99a8-4de9-9f8a-af23c8d8c0cf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, content })
+      });
+    } catch (error) {
+      console.error('Failed to save message:', error);
+    }
+  };
+
+  const clearHistory = async () => {
+    try {
+      await fetch('https://functions.poehali.dev/cc9e9e98-99a8-4de9-9f8a-af23c8d8c0cf', {
+        method: 'DELETE'
+      });
+      setMessages([]);
+      toast.success('История очищена');
+    } catch (error) {
+      toast.error('Не удалось очистить историю');
+    }
+  };
+
+  const setupMidnightCleanup = () => {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
+    
+    const timeUntilMidnight = tomorrow.getTime() - now.getTime();
+    
+    setTimeout(() => {
+      clearHistory();
+      setInterval(() => {
+        clearHistory();
+      }, 24 * 60 * 60 * 1000);
+    }, timeUntilMidnight);
+  };
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -36,6 +102,9 @@ const Index = () => {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    await saveMessage('user', input);
+    
+    const currentInput = input;
     setInput('');
     setIsLoading(true);
 
@@ -45,19 +114,22 @@ const Index = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: currentInput }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
+        const filteredContent = filterContent(data.response);
+        
         const aiMessage: Message = {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: data.response,
+          content: filteredContent,
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, aiMessage]);
+        await saveMessage('assistant', filteredContent);
       } else {
         toast.error('Ошибка: ' + (data.error || 'Не удалось получить ответ'));
       }
@@ -77,9 +149,9 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1A1F2C] via-[#221F26] to-[#1A1F2C] flex flex-col">
-      <header className="border-b border-white/10 bg-[#1A1F2C]/80 backdrop-blur-xl sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="h-screen bg-gradient-to-br from-[#1A1F2C] via-[#221F26] to-[#1A1F2C] flex flex-col overflow-hidden">
+      <header className="border-b border-white/10 bg-[#1A1F2C]/80 backdrop-blur-xl z-10 flex-shrink-0">
+        <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#9b87f5] to-[#7E69AB] flex items-center justify-center">
               <Icon name="Sparkles" size={20} className="text-white" />
@@ -90,15 +162,15 @@ const Index = () => {
             variant="ghost"
             size="icon"
             className="text-white/60 hover:text-white hover:bg-white/10"
-            onClick={() => setMessages([])}
+            onClick={clearHistory}
           >
             <Icon name="Trash2" size={18} />
           </Button>
         </div>
       </header>
 
-      <div className="flex-1 max-w-4xl w-full mx-auto px-4 py-6 flex flex-col">
-        <ScrollArea className="flex-1 pr-4" ref={scrollRef}>
+      <div className="flex-1 max-w-5xl w-full mx-auto px-4 py-6 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto pr-4 mb-4" ref={scrollRef}>
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center px-4 animate-fade-in">
               <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[#9b87f5] to-[#7E69AB] flex items-center justify-center mb-6">
@@ -160,9 +232,9 @@ const Index = () => {
               )}
             </div>
           )}
-        </ScrollArea>
+        </div>
 
-        <div className="pt-4 mt-auto">
+        <div className="flex-shrink-0">
           <div className="bg-[#2A2F3C] border border-white/10 rounded-2xl p-2 shadow-2xl">
             <Textarea
               ref={textareaRef}
